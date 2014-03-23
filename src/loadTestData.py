@@ -8,7 +8,7 @@ import getCoverage
 import getFeatureData
 import csv
 import json
-
+from redis.sentinel import Sentinel
 
 #globals
 config = {}
@@ -24,6 +24,11 @@ def initLog():
 	logger.setLevel(logging.INFO)
 	return logger
 
+def getConnection(sentinelHosts):
+	sentinel = Sentinel(sentinelHosts, socket_timeout=0.1)
+	master = sentinel.discover_master('mymaster')
+	r = redis.StrictRedis(master[0], port=int(master[1]), db=int(config["redisDb"]))
+	return r
 
 #Start Main Here
 def main(argv):
@@ -47,23 +52,31 @@ def main(argv):
 	logger=initLog()
 	logger.info('Starting Run  ========================================')
 
-	r = redis.StrictRedis(config["redisHost"], port=int(config["redisPort"]), db=int(config["redisDb"]))
-	usePiped = False
-	if (config["redisUsePiped"] == "True"):
-		usePiped = True
-	pipe = r.pipeline(not usePiped)
 	submitRate = int(config["submitRate"])
 	submitRecords = int(config["submitRecords"])
 	fromRow = int(config["startRow"])
+	hosts = config["sentinelHosts"]
+	sentinelHosts = []
+	for addr in hosts:
+		tup=(str(addr[0]),int(addr[1]))
+		sentinelHosts.append(tup)
+	usePiped = False
+	if (config["redisUsePiped"] == "True"):
+		usePiped = True
+
 	if (submitRate==0):
+		r = getConnection(sentinelHosts)
+		pipe = r.pipeline(not usePiped)
 		loadFeatureData.loadFile(config["dataFilePath"],config["redisKey"],config["redisMeasure"],r,usePiped,pipe,config, logger,fromRow)
 	else:
 		done=False		
-		while not done:
+		while not done:	
+			r = getConnection(sentinelHosts)
+			pipe = r.pipeline(not usePiped)		
 			loadFeatureData.loadFile(config["dataFilePath"],config["redisKey"],config["redisMeasure"],r,usePiped,pipe,config, logger,fromRow)
 			logger.info('Sleeping for '+str(submitRate)+' seconds...')
 			time.sleep(submitRate)
 			fromRow = fromRow+submitRecords
-
+			r=None
 if __name__ == "__main__":
 	main(sys.argv[1:])
