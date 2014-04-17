@@ -4,6 +4,8 @@ import redis
 import searches
 import json
 
+#This functions purges undesireable elements out of the coverage index. Done instead of having to re-balance it.
+#One quick loop through it, anything out of interval is thrown out. 
 def purge(timeArray,continuous, multiplier):
 	retArray=[]
 	if len(timeArray)>1:
@@ -28,16 +30,26 @@ def purge(timeArray,continuous, multiplier):
 		retArray=timeArray		
 	return(retArray)
 
+#This procedure takes these parameters:
+#This will return an array of arrays that indicate where continuous data coverage exists for 
+#<patient_id> between <startTime> and <endTime>. 
+#'Continuous' is defined as (<continuous> * <multiplier>) i.e. 
+#60 seconds * 3 = 180 seconds. Any two data points C1,C2 are considered continuous if C2-C1<180 seconds
+
+#Example return val:
+#	[[100,105],[108,115],[120,125]]
+
 def getCoverage(r, key, startTime, endTime,continuous, multiplier):
 	if startTime>endTime:
 		return {"status":"Error, startTime must occur before endTime", "values":"null"}
 	#Find first start before startTime
 	#Find first start after endTime
 
-	#Tighten this up...replace the +inf and -inf with something. Can't be startTime and endTime.
+	#Tighten this up...replace the +inf and -inf with something. Can't be startTime and endTime. Make a reasonable guess.
 	allOfThem = r.zrangebyscore(key, '-inf', '+inf',  withscores=True)
 	if (len(allOfThem) == 0):
 		return {"status":"Good", "values":[]}
+	#Perform 2 logarithmic binary searches.
 	beforePos = searches.binary_search(allOfThem, startTime,-1)
 	afterPos = searches.binary_search(allOfThem, endTime,1)
 	beforeStartTime = allOfThem[beforePos][1] 
@@ -45,6 +57,7 @@ def getCoverage(r, key, startTime, endTime,continuous, multiplier):
 	results=[]
 	started = False
 	finished = False
+	#Now iterate through the list of values 
 	for x in range(beforePos,afterPos+1):
 		startCand = None
 		endCand = None
@@ -107,6 +120,7 @@ def getCoverage(r, key, startTime, endTime,continuous, multiplier):
 			if finished:
 				break
 
+	# one more iteration and we are done.This is done in lieu of re-balancing the index.
 	return {"status":"Good","values":purge(results,continuous, multiplier)}
 
 

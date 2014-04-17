@@ -1,0 +1,45 @@
+Explanation:
+
+Redis is nothing more than a way to store sorted sets in memory. The sort key in Redis lingo is called "the score".
+In our case, the score is the discreet point in time a feature vector was created. The feature vector itself is called
+"the member". A member, with its score can be stored with a key - in our case a patient - in a one-to-many-relationship.
+Thus, a patient can have many feature vectors, each denoted by a unique time.
+
+This would be a very straightforward Redis problem but for one requirement - coverage. We need a way, given two arbitrary
+times, to determine where continuous data exists between them. 'Continuous' is defined as some temporal threshold. In
+our case, that threshold might be one minute, with a 'slop' multiplier of 3 thrown in, meaning any two members are continous
+if the difference of their scores is less than 3. 
+
+The Redis API's main function call to return data:
+
+ZRANGEBYSCORE key min max [WITHSCORES]: Return a range of members in a sorted set, by score 
+
+Coverage cannot be calculated with this function call, without returning all data in the set, and performing a scan in 
+linear time. This may be cost prohibitative in large data sets. Calling ZRANGEBYSCORE with the desired coverage interval 
+and then performing the scan will also not guarantee proper coverage calculation, either.
+
+Instead, we must calculate the last score PRIOR to the start of the desired coverage interval, and the last score AFTER the
+end of the desired coverage interval. This can be accomplished by pulling all the scores, and performing a binary search
+on them. The cost of the binary search will be logarithmic, since the data is already sorted. On this smaller subset, 
+a linear scan can be peformed to calculate all the needed coverage intervals.
+
+Two main functions used to extract data from Redis:
+
+
+1. getCoverage.getCoverage(<reddis connection>,<patient_id>,<startTime>,<endTime>,<continuous>,<multiplier>)
+
+	This will return an array of arrays that indicate where continuous data coverage exists for 
+	<patient_id> between <startTime> and <endTime>. 
+	'Continuous' is defined as (<continuous> * <multiplier>) i.e. 
+	60 seconds * 3 = 180 seconds. Any two data points C1,C2 are considered continuous if C2-C1<180 seconds
+
+	Example return val:
+		[[100,105],[108,115],[120,125]]
+-----------------------------------------------------------------------------------------------
+
+2. getFeatureData.getData(<reddis connection>,<patient_id>,<startTime>,<endTime>)
+
+	This will return a byte array of the feature data between <startTime> and <endTime> for <patient_id>
+
+	This function is intended to be called with the <startTime>,<endTime> pairs gathered from getCoverage.
+
